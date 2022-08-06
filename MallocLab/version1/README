@@ -1,0 +1,1 @@
+Implemented using Implicit Free List with struct representation of blocks.

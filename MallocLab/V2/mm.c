@@ -1,7 +1,7 @@
 /*
- * mm.c -  PHASE I - modified implicit Free List 
+ * mm.c -  PHASE II - implemented explicit Free List 
 
- *         Simple allocator based on implicit free lists,
+ *         Not so simple allocator based on explicit free lists,
  *         first fit placement, and boundary tag coalescing.
  *
  * Each block has header and footer of the form:
@@ -137,11 +137,13 @@ void mm_checkheap(int verbose);
  * mm_init - Initialize the memory manager
  */
 /* $begin mminit */
-int mm_init(void) { //TODO: set up the root node
+int mm_init(void) { 
     /* create the initial empty heap */
+    // printf("INITIAL HI = %p\n", mem_heap_hi());
     if ((prologue = mem_sbrk(CHUNKSIZE)) == (void*)-1)
         return -1;
 
+    // printf("EXPANDED HI = %p\n", mem_heap_hi());
     /* initialize the prologue */
     PACK(prologue, sizeof(header_t), ALLOC);
     
@@ -270,6 +272,8 @@ void mm_checkheap(int verbose) {
         printblock(bp);
     if (GET_SIZE(bp) != 0 || !GET_ALLOC(bp))
         printf("Bad epilogue header, epilogue size = %d, epilogue Allocation status = %d \n", GET_SIZE(bp), GET_ALLOC(bp));
+    
+    checklist();
 }
 
 /* The remaining routines are internal helper routines */
@@ -296,6 +300,7 @@ static block_t *extend_heap(size_t words) {
     header_t *new_epilogue = NEXT_BLKP(newChunkSpace);
     PACK(new_epilogue, 0, ALLOC);
 
+    // insertBlock(newChunkSpace);
     /* Coalesce if the previous block was free */
     return coalesce(newChunkSpace);
 }
@@ -357,7 +362,7 @@ static void removeBlock(block_t *block) {
             printf("Error: block not in one-element list\n");
             return;
         }
-        m_root = NULL;  //FIXME: hey! You are setting the address to NULL
+        m_root = NULL; 
         m_tail = NULL;
         block->body.prev = NULL;
         block->body.next = NULL;
@@ -402,21 +407,34 @@ static void removeBlock(block_t *block) {
  */
 /* $begin mmplace */
 static void place(block_t *block, size_t asize) {
-    size_t split_size = GET_SIZE(block) - asize;
+    uint32_t split_size = GET_SIZE(block) - asize;
 
     if (split_size < MIN_BLOCK_SIZE) {
+        // printf("placing block: WHOLE\n");
         PACK(HDRP(block), GET_SIZE(block), ALLOC);
         PACK(FTRP(block), GET_SIZE(block), ALLOC);
         removeBlock(block);
-    } else {
-        PACK(HDRP(block), asize, ALLOC);    /* split the block by updating the header and marking it allocated*/
-        PACK(FTRP(block), asize, ALLOC);    /* set footer of allocated block*/
-
-        PACK(HDRP(NEXT_BLKP(block)), split_size, FREE);    /* update the header of the new free block */
-        PACK(FTRP(NEXT_BLKP(block)), split_size, FREE);    /* update the footer of the new free block */
-
+    } 
+    
+    else {
+        // printf("placing block: SPLIT\n");
         removeBlock(block);
-        insertBlock(NEXT_BLKP(block));
+        block->block_size = asize;
+        block->allocated = ALLOC;
+        footer_t *m_footer = get_footer(block);
+        m_footer->block_size = asize;
+        m_footer->allocated = ALLOC;
+
+        block_t *splitBlock = (void *)(NEXT_BLKP(block));
+        splitBlock->block_size = split_size;
+        splitBlock->allocated = FREE;
+        footer_t *splitBlock_footer = get_footer(splitBlock);
+        splitBlock_footer->block_size = split_size;
+        splitBlock_footer->allocated = FREE;
+        // PACK(HDRP(block), asize, ALLOC);    /* split the block by updating the header and marking it allocated*/
+        // PACK(FTRP(block), asize, ALLOC);    /* set footer of allocated block*/
+
+        insertBlock(splitBlock);
     }
 
     /* TODO: delete when finished developing */
@@ -582,6 +600,16 @@ static void checklist(void) {
     {
         prv = (void *)(block->body.prev);
         nxt = (void *)(block->body.next);
+
+        if ((void *)block < mem_heap_lo() || (void *)(FTRP(block)) < mem_heap_lo())
+        {
+            printf("block b4 loheap\n");
+        }
+
+        if ((void *)(block) > mem_heap_hi() || (void *)(FTRP(block)) > mem_heap_hi())
+        {
+            printf("block above hiheap\n");
+        }
 
         block = (void *)nxt;
     }

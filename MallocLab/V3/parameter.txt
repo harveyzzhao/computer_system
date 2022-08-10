@@ -1,0 +1,3 @@
+#define LISTMAX 6
+#define MINSIZE 1024
+#define CHUNKSIZE (1 << 12) /* initial heap size (bytes) */

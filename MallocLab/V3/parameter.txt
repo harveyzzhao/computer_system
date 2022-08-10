@@ -1,3 +1,11 @@
 #define LISTMAX 6
 #define MINSIZE 1024
-#define CHUNKSIZE (1 << 12) /* initial heap size (bytes) */
+#define CHUNKSIZE (1 << 13) /* initial heap size (bytes) */
+
+/* 0.730 + 20000 */
+#define LISTMAX 5
+#define MINSIZE 4000
+#define CHUNKSIZE (1 << 13) /* initial heap size (bytes) */
+
+find_fit...
+count <= 10

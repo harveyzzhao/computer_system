@@ -75,7 +75,6 @@ typedef struct {
 enum block_state { FREE,
                    ALLOC };
 
-
 /* Macros */
 
 #define WSIZE 4
@@ -90,12 +89,6 @@ enum block_state { FREE,
 #define MAX(x,y) ((x) > (y) ? (x) : (y))
 
 #define PACK(p, size, alloc)    ((p)->block_size = size, (p)->allocated = alloc)
-#define PREV(p, prv)   ((p->body).prev = (void *)prv)  
-#define NEXT(p, nxt)   ((p->body).next = (void *)nxt)
-
-/* Read and write a word at address p */
-#define GET(p)  (*(unsigned int *)(p))
-#define PUT(p, val) (*(unsigned int *)(p) = (val))
 
 /* Read the size and allocated fields from address p */
 #define GET_SIZE(p)  (((block_t *)(p))->block_size)    //get size in BYTES
@@ -105,8 +98,6 @@ enum block_state { FREE,
 #define HDRP(bp)    (header_t *)((void *)(bp))    
 #define FTRP(bp)    (footer_t *)((void *)(bp) + GET_SIZE(HDRP(bp)) - sizeof(header_t))  // ADD (VOID *) if an error pops up
 #define PLDP(bp)    ((void *)(bp) + sizeof(header_t))   //accessing PAYLOAD in allocated blocks
-#define NXTP(bp)    ((void *)(bp) + sizeof(header_t))   //accessing NEXT pointer in free blocks
-#define PRVP(bp)    ((void *)(bp) + sizeof(header_t) + sizeof(root))    //accessing PREV pointer in free blocks
 
 /* Given block ptr bp, compute address of next and previous blocks */
 #define PREV_FTRP(bp)   ((void *)bp - sizeof(header_t))
@@ -117,9 +108,9 @@ enum block_state { FREE,
 #define CHK_ALN(bp)     (((uint64_t)PLDP(bp)) % 8)  //if aligned to DSIZE, return 0
 
 /* Global variables */
-static block_t *prologue = NULL; /* pointer to first block */
-static block_t *segList = NULL;    /* pointer to the first seglist */
-static block_t *epilogue = NULL;
+static block_t *prologue; /* pointer to first block */
+static block_t *segList;    /* pointer to the first seglist */
+static block_t *epilogue;
 /* seglist usage: each segList initial block contains its own Root (->body.next) and own tail(->body.prev); it is not pointed to by any free blocks. */
 
 /* function prototypes for internal helper routines */
@@ -465,7 +456,7 @@ static block_t *place(block_t *block, size_t asize) {
 
     uint32_t split_size = GET_SIZE(block) - asize;
     removeBlock(block);
-    if (split_size < MIN_BLOCK_SIZE) {
+    if (split_size < 245) {
         // printf("placing block: WHOLE\n");
         PACK(HDRP(block), GET_SIZE(block), ALLOC);
         PACK(FTRP(block), GET_SIZE(block), ALLOC);

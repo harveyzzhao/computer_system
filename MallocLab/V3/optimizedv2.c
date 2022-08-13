@@ -104,8 +104,6 @@ enum block_state { FREE,
 #define NEXT_BLKP(bp)   ((void *)(bp) + GET_SIZE(bp))  //points to the beginning of the block, not the payload
 #define PREV_BLKP(bp)   ((void *)(bp) - GET_SIZE(PREV_FTRP(bp)))
 
-/* Checking purposes */
-#define CHK_ALN(bp)     (((uint64_t)PLDP(bp)) % 8)  //if aligned to DSIZE, return 0
 
 /* Global variables */
 static block_t *prologue; /* pointer to first block */
@@ -115,7 +113,7 @@ static block_t *epilogue;
 
 /* function prototypes for internal helper routines */
 static block_t *extend_heap(size_t words);
-static block_t *place(block_t *block, size_t asize);
+static void place(block_t *block, size_t asize);
 static block_t *find_fit(size_t asize);
 static block_t *coalesce(block_t *block);
 static footer_t *get_footer(block_t *block);
@@ -208,7 +206,7 @@ void *mm_malloc(size_t size) {
 
     /* Search the free list for a fit */
     if ((block = find_fit(asize)) != NULL) {
-        block = place(block, asize);
+        place(block, asize);
         return PLDP(block);
     }
 
@@ -217,9 +215,9 @@ void *mm_malloc(size_t size) {
     extendwords = extendsize >> 3; // extendsize/8
     if ((block = extend_heap(extendwords)) != NULL) {
         // printf("No fit found. Get %d memory and place the block\n", extendsize);
-        block = place(block, asize);
+        place(block, asize);
         // mm_checkheap(0);
-        return block->body.payload;
+        return PLDP(block);
     }
     
     /* no more memory :( */
@@ -320,7 +318,7 @@ static block_t *extend_heap(size_t words) {
     PACK(new_epilogue, 0, ALLOC);
 
     epilogue = (void *)new_epilogue;
-    // insertBlock(newChunkSpace);
+    
     /* Coalesce if the previous block was free */
     return coalesce(newChunkSpace);
 }
@@ -339,18 +337,17 @@ static void insertBlock(block_t *block) {
 
     block_t *m_root = (void *)(targetNode->body.next);
     block_t *m_tail = (void *)(targetNode->body.prev);
-    if (m_root == NULL)
-    {
-        block->body.prev = NULL;
-        block->body.next = NULL;
-        targetNode->body.next = (void *)block;
-        targetNode->body.prev = (void *)block;
-    } else {
+    if (m_root != NULL) {
         m_root->body.prev = (void *)block;
         block->body.next = (void *)m_root;
         block->body.prev = NULL;
         targetNode->body.next = (void *)block;
         m_tail->body.next = NULL;
+    } else {
+        block->body.prev = NULL;
+        block->body.next = NULL;
+        targetNode->body.next = (void *)block;
+        targetNode->body.prev = (void *)block;
     }
 }
 
@@ -381,11 +378,6 @@ static void removeBlock(block_t *block) {
     /* case 2. one-element list */
     else if (m_root == m_tail)
     {
-        if (block != m_root || block != m_tail)
-        {
-            printf("Error: block not in one-element list\n");
-            return;
-        }
         targetNode->body.next = NULL; 
         targetNode->body.prev = NULL;
         block->body.prev = NULL;
@@ -434,20 +426,19 @@ static void removeBlock(block_t *block) {
  *         and split if remainder would be at least minimum block size
  */
 /* $begin mmplace */
-static block_t *place(block_t *block, size_t asize) {
+static void place(block_t *block, size_t asize) {
 
     // printf("Placing block: original block of size %d", block->block_size);
 
     uint32_t split_size = GET_SIZE(block) - asize;
     removeBlock(block);
-    if (split_size < 245) {
+    if (split_size <= 227) {
         // printf("placing block: WHOLE\n");
         PACK(HDRP(block), GET_SIZE(block), ALLOC);
         PACK(FTRP(block), GET_SIZE(block), ALLOC);
-        return block;
     } 
 
-    // else if (asize >= 400) {
+    // else if (split_size < 250) {
     //     // printf("placing block OF SIZE %lu: SPLIT\n", asize);
     //     block->block_size = split_size;
     //     footer_t *m_footer = get_footer(block);
@@ -479,7 +470,6 @@ static block_t *place(block_t *block, size_t asize) {
         splitBlock_footer->block_size = split_size;
         splitBlock_footer->allocated = FREE;
         insertBlock(splitBlock);
-        return block;
     }
 
     /* TODO: delete when finished developing */
@@ -502,7 +492,7 @@ static block_t *find_fit(size_t asize) {
         block_t *targetNode = (void *)segList + MIN_BLOCK_SIZE * i;
         block_t *m_root = (void *)(targetNode->body.next);
         int count = 0;
-        while (m_root != NULL && count <= 11)
+        while (m_root != NULL && count <= 10)
         {
             if (GET_SIZE(m_root) >= asize)
             {
@@ -536,7 +526,21 @@ static block_t *coalesce(block_t *block) {
         insertBlock(block);
         return block;
     }
-        
+
+    else if (!prev_alloc && next_alloc) {
+        // printf("FTA\n");
+        //merge prevBlk + currBlk
+        block_t *prevblk = (void *)PREV_BLKP(block);
+        removeBlock(prevblk);
+
+        size += GET_SIZE(prevblk);
+        PACK(FTRP(block), size, FREE);
+        PACK(prevblk, size, FREE);  //FIXME: these may invoke seg fault because we rewrote the blocks
+
+        insertBlock(prevblk);
+        return prevblk;
+    }    
+
     /* case II: A | T | F */
     else if (prev_alloc && !next_alloc)
     {
@@ -550,21 +554,6 @@ static block_t *coalesce(block_t *block) {
         PACK(FTRP(block), size, FREE);
         insertBlock(block);
         return block;
-    }
-
-    /* Case III: F | T | A */ //FIXME: ERROR HERE - CAUSING HEAP TO EXPAND
-    else if (!prev_alloc && next_alloc) {
-        // printf("FTA\n");
-        //merge prevBlk + currBlk
-        block_t *prevblk = (void *)PREV_BLKP(block);
-        removeBlock(prevblk);
-
-        size += GET_SIZE(prevblk);
-        PACK(FTRP(block), size, FREE);
-        PACK(prevblk, size, FREE);  //FIXME: these may invoke seg fault because we rewrote the blocks
-
-        insertBlock(prevblk);
-        return prevblk;
     }
 
     /* case IV: F | T | F */
@@ -615,7 +604,7 @@ static void checkblock(block_t *block) {
     // • Are there any contiguous free blocks that somehow escaped coalescing? 
     // • Do any allocated blocks overlap?   ALREADY CHECKED BY mdriver
 
-    if (CHK_ALN(block)) {
+    if (((uint64_t)PLDP(block)) % 8) {
         printf("Error: payload for block at %p is not aligned\n", block);
     }
 
